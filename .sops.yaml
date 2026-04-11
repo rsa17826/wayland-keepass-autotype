@@ -1,0 +1,4 @@
+creation_rules:
+  - path_regex: .*\.ya?ml$
+    age: >-
+      age12kl0dmlpcwuw2c6uq5c8dzhyg34cl7r2qzylxzte0ewe8eemz9jqfq4hl8
