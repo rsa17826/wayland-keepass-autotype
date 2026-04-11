@@ -99,7 +99,7 @@ for entry in matched:
       print(f"    window={assoc['window']!r}  sequence={assoc['sequence']!r}")
   else:
     print("  AutoType associations: (none)")
-
+@regex -
   # ── Custom properties ─────────────────────────────────────────────────────
   custom = entry.custom_properties # dict[str, str]
   if custom:
