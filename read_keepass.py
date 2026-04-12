@@ -1,4 +1,5 @@
 from __future__ import annotations
+import argparse
 import base64
 import fnmatch
 import hashlib
@@ -12,7 +13,45 @@ from urllib.parse import parse_qs, urlparse
 from pykeepass.pykeepass import PyKeePass
 from sopsy import Sops
 
-sops = Sops("secrets.yml")
+# ── CLI args ──────────────────────────────────────────────────────────────────
+_parser = argparse.ArgumentParser(description="KeePass autotype for Hyprland")
+_ = _parser.add_argument(
+  "--db", "-d",
+  default="/home/nyix/keepassdb/keepass.kdbx",
+  help="Path to the .kdbx database file",
+)
+_ = _parser.add_argument(
+  "--secrets", "-s",
+  default="secrets.yml",
+  help="Path to the sops-encrypted secrets file",
+)
+args = _parser.parse_args()
+
+# ── KeePass password: sops → rofi password prompt fallback ───────────────────
+def _ask_password_rofi() -> str:
+  result = subprocess.run(
+    ["rofi", "-dmenu", "-password", "-p", "KeePass password"],
+    input="",
+    capture_output=True,
+    text=True,
+  )
+  if result.returncode != 0 or not result.stdout:
+    print("Aborted.")
+    raise SystemExit(0)
+  return result.stdout.rstrip("\n")
+
+def _get_password(secrets_path: str) -> str:
+  try:
+    sops = Sops(secrets_path)
+    pw = sops.get("my_secret_key") # pyright: ignore[reportAny]
+    if pw is None:
+      raise KeyError("my_secret_key not found in sops file")
+    return pw # type: ignore[return-value] # pyright: ignore[reportAny]
+  except Exception as e:
+    print(f"sops unavailable ({e}), falling back to password prompt.")
+    return _ask_password_rofi()
+
+kdbx_password = _get_password(args.secrets)
 
 # ── Active Hyprland window ────────────────────────────────────────────────────
 win = json.loads(subprocess.check_output(["hyprctl", "activewindow", "-j"]))
@@ -181,7 +220,7 @@ def matches_entry(entry) -> bool:
 
   return False
 
-kp: PyKeePass = PyKeePass("/home/nyix/keepassdb/keepass.kdbx", password=sops.get("my_secret_key")) # pyright: ignore[reportAny]
+kp: PyKeePass = PyKeePass(args.db, password=kdbx_password) # pyright: ignore[reportAny]
 print(f"Active window: class={win_class!r}  title={win_title!r}\n")
 
 matched = [e for e in kp.entries if matches_entry(e)]
