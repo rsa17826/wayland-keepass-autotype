@@ -188,60 +188,91 @@ matched = [e for e in kp.entries if matches_entry(e)]
 
 if not matched:
   print("No matching entries.")
+  raise SystemExit(0)
 
-for entry in matched:
-  print(f"=== {entry.title} ===")
-
-  # ── Basic fields ─────────────────────────────────────────────────────────
-  print(f"  Title:    {entry.title}")
-  print(f"  Username: {entry.username}")
-  print(f"  Password: {entry.password}")
-  print(f"  URL:      {entry.url}")
-
-  # ── OTP (TOTP / HOTP) ────────────────────────────────────────────────────
-  otp_uri = entry.otp # e.g. "otpauth://totp/label?secret=BASE32SECRET&..."
-  print(f"  OTP URI:  {otp_uri}")
-  code=None
-  if otp_uri:
-    parsed = urlparse(otp_uri)
-    params = parse_qs(parsed.query)
-    secret_b32 = params.get("secret", [None])[0]
-
-    if secret_b32:
-      try:
-        key = base64.b32decode(secret_b32.upper() + ("=" * (-len(secret_b32) % 8)))
-        counter = struct.pack(">Q", int(time.time()) // 30)
-        mac = hmac.new(key, counter, hashlib.sha1).digest()
-        offset = mac[-1] & 0x0F
-        code = str((struct.unpack(">I", mac[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000)
-        print(f"  OTP Code: {code:06d}")
-      except Exception as e:
-        print(f"  OTP Error: {e}")
-  run_autotype(entry.autotype_sequence, entry.username, entry.password, code)
-
-  # ── Auto-Type ─────────────────────────────────────────────────────────────
-  print(f"  AutoType enabled:  {entry.autotype_enabled}")
-  print(f"  AutoType sequence: {entry.autotype_sequence}")
-
-  associations = [
-    {
-      "window":   a.findtext("Window"),
-      "sequence": a.findtext("KeystrokeSequence") or None,
-    }
-    for a in entry._element.findall("AutoType/Association")
+if len(matched) == 1:
+  entry = matched[0]
+else:
+  # Build a label list: "Title (username)" for disambiguation
+  labels = [
+    f"{e.title}  [{e.username or ''}]  {e.url or ''}"
+    for e in matched
   ]
-  if associations:
-    print("  AutoType associations:")
-    for assoc in associations:
-      print(f"    window={assoc['window']!r}  sequence={assoc['sequence']!r}")
-  else:
-    print("  AutoType associations: (none)")
+  menu_input = "\n".join(labels)
 
-  # ── Custom properties ─────────────────────────────────────────────────────
-  custom = entry.custom_properties # dict[str, str]
-  if custom:
-    print("  Custom properties:")
-    for k, v in custom.items():
-      print(f"    {k}: {v}")
+  result = subprocess.run(
+    [
+      "rofi", "-dmenu",
+      "-i",                        # case-insensitive filter
+      "-p", "KeePass",
+      "-format", "i",              # return selected index, not text
+      "-no-custom",                # disallow free-form input
+    ],
+    input=menu_input,
+    capture_output=True,
+    text=True,
+  )
 
-  print()
+  if result.returncode != 0 or not result.stdout.strip():
+    # ESC pressed or no selection
+    print("Aborted.")
+    raise SystemExit(0)
+
+  entry = matched[int(result.stdout.strip())]
+
+print(f"=== {entry.title} ===")
+
+# ── Basic fields ─────────────────────────────────────────────────────────
+print(f"  Title:    {entry.title}")
+print(f"  Username: {entry.username}")
+print(f"  Password: {entry.password}")
+print(f"  URL:      {entry.url}")
+
+# ── OTP (TOTP / HOTP) ────────────────────────────────────────────────────
+otp_uri = entry.otp # e.g. "otpauth://totp/label?secret=BASE32SECRET&..."
+print(f"  OTP URI:  {otp_uri}")
+code = None
+if otp_uri:
+  parsed = urlparse(otp_uri)
+  params = parse_qs(parsed.query)
+  secret_b32 = params.get("secret", [None])[0]
+
+  if secret_b32:
+    try:
+      key = base64.b32decode(secret_b32.upper() + ("=" * (-len(secret_b32) % 8)))
+      counter = struct.pack(">Q", int(time.time()) // 30)
+      mac = hmac.new(key, counter, hashlib.sha1).digest()
+      offset = mac[-1] & 0x0F
+      code = str((struct.unpack(">I", mac[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000)
+      print(f"  OTP Code: {code:0>6}")
+    except Exception as e:
+      print(f"  OTP Error: {e}")
+
+run_autotype(entry.autotype_sequence, entry.username, entry.password, code)
+
+# ── Auto-Type ─────────────────────────────────────────────────────────────
+print(f"  AutoType enabled:  {entry.autotype_enabled}")
+print(f"  AutoType sequence: {entry.autotype_sequence}")
+
+associations = [
+  {
+    "window":   a.findtext("Window"),
+    "sequence": a.findtext("KeystrokeSequence") or None,
+  }
+  for a in entry._element.findall("AutoType/Association")
+]
+if associations:
+  print("  AutoType associations:")
+  for assoc in associations:
+    print(f"    window={assoc['window']!r}  sequence={assoc['sequence']!r}")
+else:
+  print("  AutoType associations: (none)")
+
+# ── Custom properties ─────────────────────────────────────────────────────
+custom = entry.custom_properties # dict[str, str]
+if custom:
+  print("  Custom properties:")
+  for k, v in custom.items():
+    print(f"    {k}: {v}")
+
+print()

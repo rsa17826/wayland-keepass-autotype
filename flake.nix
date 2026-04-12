@@ -39,7 +39,12 @@
 
         app = pkgs.writeShellApplication {
           name = "wayland-keepass-autotype";
-          runtimeInputs = [ pythonEnv ];
+          runtimeInputs = with pkgs; [
+            wtype
+            rofi
+            sops
+            pythonEnv
+          ];
           text = ''
             python ${./read_keepass.py} "$@"
           '';
