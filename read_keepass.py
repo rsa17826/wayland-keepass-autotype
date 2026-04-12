@@ -224,18 +224,43 @@ def run_autotype(
   delay_ms = 0
   text_buf: list[str] = []
 
+  # Characters wtype cannot type as literals — map to XKB keysym names.
+  _KEYSYM_CHARS: dict[str, str] = {
+    "`": "grave",
+    "~": "asciitilde",
+    "\\": "backslash",
+    "|": "bar",
+  }
+
   def flush_text() -> None:
     if not text_buf:
       return
     chunk = "".join(text_buf)
     text_buf.clear()
-    if not chunk:          # skip empty — e.g. {kpotp} when otp=""
+    if not chunk:   # skip empty — e.g. {kpotp} when otp=""
       return
-    args: list[str] = []
-    if delay_ms > 0:
-      args += ["-d", str(delay_ms)]
-    args += ["--", chunk]
-    _wtype(*args)
+
+    # Split into runs of normal chars and individual keysym chars.
+    run: list[str] = []
+
+    def _flush_run() -> None:
+      if not run:
+        return
+      normal = "".join(run)
+      run.clear()
+      w_args: list[str] = []
+      if delay_ms > 0:
+        w_args += ["-d", str(delay_ms)]
+      w_args += ["--", normal]
+      _wtype(*w_args)
+
+    for ch in chunk:
+      if ch in _KEYSYM_CHARS:
+        _flush_run()
+        press_key(_KEYSYM_CHARS[ch])
+      else:
+        run.append(ch)
+    _flush_run()
 
   def press_key(xkb_key: str, shift: bool = False) -> None:
     args: list[str] = []
@@ -309,7 +334,27 @@ def matches_entry(entry) -> bool:
 
   return False
 
-kp: PyKeePass = PyKeePass(args.db, password=kdbx_password) # pyright: ignore[reportAny]
+def _open_keepass(db_path: str, password: str, ttl: int) -> PyKeePass:
+  """Open the database, re-prompting via rofi on wrong password until correct or aborted."""
+  while True:
+    try:
+      return PyKeePass(db_path, password=password) # pyright: ignore[reportAny]
+    except Exception as e:
+      # Wipe bad cached password so we don't re-use it next run
+      try:
+        os.unlink(_CACHE_FILE)
+      except FileNotFoundError:
+        pass
+      _kill_old_watchdog()
+      print(f"Failed to open database: {e}")
+      password = _ask_password_rofi()
+      if not password:
+        print("Aborted.")
+        raise SystemExit(0)
+      # Cache the new password so a successful open persists it below
+      _write_cache(password, ttl)
+
+kp = _open_keepass(args.db, kdbx_password, args.cache_ttl)
 print(f"Active window: class={win_class!r}  title={win_title!r}\n")
 
 matched = [e for e in kp.entries if matches_entry(e)]
