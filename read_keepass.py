@@ -182,7 +182,6 @@ def matches_entry(entry) -> bool:
   return False
 
 kp: PyKeePass = PyKeePass("/home/nyix/keepassdb/keepass.kdbx", password=sops.get("my_secret_key")) # pyright: ignore[reportAny]
-import os
 print(f"Active window: class={win_class!r}  title={win_title!r}\n")
 
 matched = [e for e in kp.entries if matches_entry(e)]
