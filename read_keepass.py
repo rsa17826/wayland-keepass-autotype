@@ -5,6 +5,8 @@ import fnmatch
 import hashlib
 import hmac
 import json
+import os
+import signal
 import struct
 import subprocess
 import time
@@ -25,9 +27,87 @@ _ = _parser.add_argument(
   default="secrets.yml",
   help="Path to the sops-encrypted secrets file",
 )
+_ = _parser.add_argument(
+  "--cache-ttl", "-c",
+  type=int,
+  default=0,
+  metavar="SECONDS",
+  help="Cache the KeePass password for this many seconds of inactivity (0 = disabled)",
+)
+_ = _parser.add_argument(
+  "--password-only", "-p",
+  action="store_true",
+  help="Type only the password instead of the full autotype sequence",
+)
+_ = _parser.add_argument(
+  "--otp-only", "-o",
+  action="store_true",
+  help="Type only the current OTP/TOTP code instead of the full autotype sequence",
+)
 args = _parser.parse_args()
 
-# ── KeePass password: sops → rofi password prompt fallback ───────────────────
+if args.password_only and args.otp_only:
+  _parser.error("--password-only and --otp-only are mutually exclusive")
+
+# ── KeePass password: cache + watchdog auto-expiry ───────────────────────────
+_USER         = os.getenv("USER", "user")
+_CACHE_FILE   = f"/tmp/.kp_pw_cache_{_USER}"
+_WATCHDOG_PID = f"/tmp/.kp_pw_watchdog_{_USER}.pid"
+
+def _kill_old_watchdog() -> None:
+  """Terminate any previously spawned watchdog process."""
+  try:
+    with open(_WATCHDOG_PID) as f:
+      pid = int(f.read().strip())
+    os.kill(pid, signal.SIGTERM)
+  except (FileNotFoundError, ProcessLookupError, ValueError, PermissionError):
+    pass
+  try:
+    os.unlink(_WATCHDOG_PID)
+  except FileNotFoundError:
+    pass
+
+def _start_watchdog(ttl: int) -> None:
+  """Spawn a detached process that deletes the cache after ttl seconds.
+
+  Kills any existing watchdog first, effectively resetting the timer on
+  each call (i.e. each successful autotype invocation).
+  """
+  _kill_old_watchdog()
+  if ttl <= 0:
+    return
+  proc = subprocess.Popen(
+    [
+      "sh", "-c",
+      f"sleep {ttl} && rm -f {_CACHE_FILE} {_WATCHDOG_PID}",
+    ],
+    start_new_session=True,   # detach from our process group
+    close_fds=True,
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+  )
+  fd = os.open(_WATCHDOG_PID, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+  with os.fdopen(fd, "w") as f:
+    _ = f.write(str(proc.pid))
+
+def _read_cache(ttl: int) -> str | None:
+  """Return cached password if the cache file exists (watchdog enforces TTL)."""
+  if ttl <= 0:
+    return None
+  try:
+    with open(_CACHE_FILE) as f:
+      return f.read()
+  except FileNotFoundError:
+    return None
+
+def _write_cache(password: str, ttl: int) -> None:
+  if ttl <= 0:
+    return
+  fd = os.open(_CACHE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+  with os.fdopen(fd, "w") as f:
+    f.write(password)
+
 def _ask_password_rofi() -> str:
   result = subprocess.run(
     ["rofi", "-dmenu", "-password", "-p", "KeePass password"],
@@ -40,18 +120,27 @@ def _ask_password_rofi() -> str:
     raise SystemExit(0)
   return result.stdout.rstrip("\n")
 
-def _get_password(secrets_path: str) -> str:
+def _get_password(secrets_path: str, ttl: int) -> str:
+  cached = _read_cache(ttl)
+  if cached is not None:
+    print("Using cached password.")
+    return cached
+
   try:
     sops = Sops(secrets_path)
     pw = sops.get("my_secret_key") # pyright: ignore[reportAny]
     if pw is None:
       raise KeyError("my_secret_key not found in sops file")
-    return pw # type: ignore[return-value] # pyright: ignore[reportAny]
+    password: str = pw # type: ignore[assignment] # pyright: ignore[reportAny]
   except Exception as e:
     print(f"sops unavailable ({e}), falling back to password prompt.")
-    return _ask_password_rofi()
+    password = _ask_password_rofi()
 
-kdbx_password = _get_password(args.secrets)
+  _write_cache(password, ttl)
+  _start_watchdog(ttl)
+  return password
+
+kdbx_password = _get_password(args.secrets, args.cache_ttl)
 
 # ── Active Hyprland window ────────────────────────────────────────────────────
 win = json.loads(subprocess.check_output(["hyprctl", "activewindow", "-j"]))
@@ -287,7 +376,21 @@ if otp_uri:
     except Exception as e:
       print(f"  OTP Error: {e}")
 
-run_autotype(entry.autotype_sequence, entry.username, entry.password, code)
+# ── Select autotype sequence based on flags ───────────────────────────────
+if args.password_only:
+  autotype_sequence = "{Password}"
+elif args.otp_only:
+  if not code:
+    print("No OTP available for this entry.")
+    raise SystemExit(1)
+  autotype_sequence = "{KPOTP}"
+else:
+  autotype_sequence = entry.autotype_sequence # None → default in run_autotype
+
+run_autotype(autotype_sequence, entry.username, entry.password, code)
+
+# Reset the inactivity timer — new watchdog kills old one and starts fresh
+_start_watchdog(args.cache_ttl)
 
 # ── Auto-Type ─────────────────────────────────────────────────────────────
 print(f"  AutoType enabled:  {entry.autotype_enabled}")
