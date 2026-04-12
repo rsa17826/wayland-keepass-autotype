@@ -15,8 +15,7 @@ from sopsy import Sops
 sops = Sops("secrets.yml")
 
 # ── Active Hyprland window ────────────────────────────────────────────────────
-raw = subprocess.check_output(["hyprctl", "activewindow", "-j"])
-win = json.loads(raw)
+win = json.loads(subprocess.check_output(["hyprctl", "activewindow", "-j"]))
 # hyprctl gives "class" (e.g. "firefox") and "title" (e.g. "GitHub — Mozilla Firefox")
 win_class: str = win.get("class", "")
 win_title: str = win.get("title", "")
@@ -91,6 +90,7 @@ def run_autotype(
     "USERNAME": username or "",
     "PASSWORD": password or "",
     "KPOTP":    otp or "",
+    "OTP":    otp or "",
   }
 
   delay_ms = 0
