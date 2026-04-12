@@ -14,6 +14,8 @@
     flake-utils.lib.eachDefaultSystem (
       system:
       let
+        pkgs = import nixpkgs { inherit system; };
+
         sopsy = pkgs.python313Packages.buildPythonPackage rec {
           pname = "sopsy";
           version = "1.2.1";
@@ -23,18 +25,9 @@
             inherit pname version;
             hash = "sha256-IVmoL2/uELfim2iOSgvcGlDpbo2iNX/0b5dVSv8JkPE=";
           };
-          propagatedBuildInputs = with pkgs.python313Packages; [
-            pyyaml
-          ];
-
+          propagatedBuildInputs = with pkgs.python313Packages; [ pyyaml ];
           build-system = [ pkgs.python313Packages.hatchling ];
-
-          # sopsy only needs the stdlib at import time; sops binary is runtime
           doCheck = false;
-        };
-
-        pkgs = import nixpkgs {
-          inherit system;
         };
 
         pythonEnv = pkgs.python313.withPackages (
@@ -44,8 +37,23 @@
           ]
         );
 
+        app = pkgs.writeShellApplication {
+          name = "wayland-keepass-autotype";
+          runtimeInputs = [ pythonEnv ];
+          text = ''
+            python ${./read_keepass.py} "$@"
+          '';
+        };
+
       in
       {
+        packages.default = app;
+
+        apps.default = {
+          type = "app";
+          program = "${app}/bin/wayland-keepass-autotype";
+        };
+
         devShells.default = pkgs.mkShell {
           buildInputs = [ pythonEnv ];
         };
