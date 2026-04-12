@@ -17,7 +17,7 @@ from sopsy import Sops
 _parser = argparse.ArgumentParser(description="KeePass autotype for Hyprland")
 _ = _parser.add_argument(
   "--db", "-d",
-  default="/home/nyix/keepassdb/keepass.kdbx",
+  default="keepass.kdbx",
   help="Path to the .kdbx database file",
 )
 _ = _parser.add_argument(
