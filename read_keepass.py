@@ -18,29 +18,34 @@ from sopsy import Sops
 # ── CLI args ──────────────────────────────────────────────────────────────────
 _parser = argparse.ArgumentParser(description="KeePass autotype for Hyprland")
 _ = _parser.add_argument(
-  "--db", "-d",
+  "--db",
+  "-d",
   default="keepass.kdbx",
   help="Path to the .kdbx database file",
 )
 _ = _parser.add_argument(
-  "--secrets", "-s",
+  "--secrets",
+  "-s",
   default="secrets.yml",
   help="Path to the sops-encrypted secrets file",
 )
 _ = _parser.add_argument(
-  "--cache-ttl", "-c",
+  "--cache-ttl",
+  "-c",
   type=int,
   default=0,
   metavar="SECONDS",
   help="Cache the KeePass password for this many seconds of inactivity (0 = disabled)",
 )
 _ = _parser.add_argument(
-  "--password-only", "-p",
+  "--password-only",
+  "-p",
   action="store_true",
   help="Type only the password instead of the full autotype sequence",
 )
 _ = _parser.add_argument(
-  "--otp-only", "-o",
+  "--otp-only",
+  "-o",
   action="store_true",
   help="Type only the current OTP/TOTP code instead of the full autotype sequence",
 )
@@ -50,9 +55,10 @@ if args.password_only and args.otp_only:
   _parser.error("--password-only and --otp-only are mutually exclusive")
 
 # ── KeePass password: cache + watchdog auto-expiry ───────────────────────────
-_USER         = os.getenv("USER", "user")
-_CACHE_FILE   = f"/tmp/.kp_pw_cache_{_USER}"
+_USER = os.getenv("USER", "user")
+_CACHE_FILE = f"/tmp/.kp_pw_cache_{_USER}"
 _WATCHDOG_PID = f"/tmp/.kp_pw_watchdog_{_USER}.pid"
+
 
 def _kill_old_watchdog() -> None:
   """Terminate any previously spawned watchdog process."""
@@ -67,6 +73,7 @@ def _kill_old_watchdog() -> None:
   except FileNotFoundError:
     pass
 
+
 def _start_watchdog(ttl: int) -> None:
   """Spawn a detached process that deletes the cache after ttl seconds.
 
@@ -78,10 +85,11 @@ def _start_watchdog(ttl: int) -> None:
     return
   proc = subprocess.Popen(
     [
-      "sh", "-c",
+      "sh",
+      "-c",
       f"sleep {ttl} && rm -f {_CACHE_FILE} {_WATCHDOG_PID}",
     ],
-    start_new_session=True,   # detach from our process group
+    start_new_session=True, # detach from our process group
     close_fds=True,
     stdin=subprocess.DEVNULL,
     stdout=subprocess.DEVNULL,
@@ -90,6 +98,7 @@ def _start_watchdog(ttl: int) -> None:
   fd = os.open(_WATCHDOG_PID, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
   with os.fdopen(fd, "w") as f:
     _ = f.write(str(proc.pid))
+
 
 def _read_cache(ttl: int) -> str | None:
   """Return cached password if the cache file exists (watchdog enforces TTL)."""
@@ -101,12 +110,14 @@ def _read_cache(ttl: int) -> str | None:
   except FileNotFoundError:
     return None
 
+
 def _write_cache(password: str, ttl: int) -> None:
   if ttl <= 0:
     return
   fd = os.open(_CACHE_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
   with os.fdopen(fd, "w") as f:
     f.write(password)
+
 
 def _ask_password_rofi() -> str:
   result = subprocess.run(
@@ -119,6 +130,7 @@ def _ask_password_rofi() -> str:
     print("Aborted.")
     raise SystemExit(0)
   return result.stdout.rstrip("\n")
+
 
 def _get_password(secrets_path: str, ttl: int) -> str:
   cached = _read_cache(ttl)
@@ -139,6 +151,7 @@ def _get_password(secrets_path: str, ttl: int) -> str:
   _write_cache(password, ttl)
   _start_watchdog(ttl)
   return password
+
 
 kdbx_password = _get_password(args.secrets, args.cache_ttl)
 
@@ -167,43 +180,45 @@ KeePass autotype sequence executor for Wayland/Hyprland via wtype.
 import re
 
 KEY_MAP: dict[str, str] = {
-  "TAB":       "tab",
-  "RETURN":     "Return",
+  "TAB": "tab",
+  "RETURN": "Return",
   "BACKSPACE": "BackSpace",
-  "BS":        "BackSpace",
-  "DELETE":    "Delete",
-  "DEL":       "Delete",
-  "INSERT":    "Insert",
-  "INS":       "Insert",
-  "SPACE":     "space",
-  "ESC":       "Escape",
-  "UP":        "Up",
-  "DOWN":      "Down",
-  "LEFT":      "Left",
-  "RIGHT":     "Right",
-  "HOME":      "Home",
-  "END":       "End",
-  "PGUP":      "Prior",
-  "ENTER":      "Return",
-  "PGDN":      "Next",
-  "CAPSLOCK":  "Caps_Lock",
-  "WIN":       "super",
+  "BS": "BackSpace",
+  "DELETE": "Delete",
+  "DEL": "Delete",
+  "INSERT": "Insert",
+  "INS": "Insert",
+  "SPACE": "space",
+  "ESC": "Escape",
+  "UP": "Up",
+  "DOWN": "Down",
+  "LEFT": "Left",
+  "RIGHT": "Right",
+  "HOME": "Home",
+  "END": "End",
+  "PGUP": "Prior",
+  "ENTER": "Return",
+  "PGDN": "Next",
+  "CAPSLOCK": "Caps_Lock",
+  "WIN": "super",
   **{f"F{i}": f"F{i}" for i in range(1, 17)},
 }
 
 _TOKEN_RE = re.compile(
-  r"\{DELAY=(\d+)\}"       # group 1: {DELAY=N}  global delay
- +r"|\{DELAY\s+(\d+)\}"    # group 2: {DELAY N}  one-shot sleep
- +r"|(\+?)\{([^}]+)\}"     # group 3,4: [+]{TOKEN}
- +r"|(\+)([\s\S])"          # group 5,6: +<char>   shift+literal char
- +r"|([^{+]+)"              # group 7: plain text chunk
- +r"|([\s\S])",             # group 8: fallback single char
+  r"\{DELAY=(\d+)\}" # group 1: {DELAY=N}  global delay
+  + r"|\{DELAY\s+(\d+)\}" # group 2: {DELAY N}  one-shot sleep
+  + r"|(\+?)\{([^}]+)(?: (\d))?\}" # group 3,4: [+]{TOKEN}
+  + r"|(\+)([\s\S])" # group 5,6: +<char>   shift+literal char
+  + r"|([^{+]+)" # group 7: plain text chunk
+  + r"|([\s\S])", # group 8: fallback single char
   re.IGNORECASE,
 )
+
 
 def _wtype(*args: str) -> None:
   print(args)
   _ = subprocess.run(["wtype", *args], check=True)
+
 
 def run_autotype(
   sequence: str | None,
@@ -217,8 +232,8 @@ def run_autotype(
   resolved: dict[str, str] = {
     "USERNAME": username or "",
     "PASSWORD": password or "",
-    "KPOTP":    otp or "",
-    "OTP":    otp or "",
+    "KPOTP": otp or "",
+    "OTP": otp or "",
   }
 
   delay_ms = 0
@@ -237,7 +252,7 @@ def run_autotype(
       return
     chunk = "".join(text_buf)
     text_buf.clear()
-    if not chunk:   # skip empty — e.g. {kpotp} when otp=""
+    if not chunk: # skip empty — e.g. {kpotp} when otp=""
       return
 
     # Split into runs of normal chars and individual keysym chars.
@@ -274,7 +289,17 @@ def run_autotype(
     _wtype(*args)
 
   for m in _TOKEN_RE.finditer(sequence):
-    global_delay, once_delay, modifier, key_name, _plus, plus_char, plain, fallback = m.groups()
+    (
+      global_delay,
+      once_delay,
+      modifier,
+      key_name,
+      key_count,
+      _plus,
+      plus_char,
+      plain,
+      fallback,
+    ) = m.groups()
 
     if global_delay is not None:
       flush_text()
@@ -287,14 +312,19 @@ def run_autotype(
     elif key_name is not None:
       upper = key_name.upper()
       shift = modifier == "+"
-      if upper in resolved:
-        # placeholder → always literal text, + inside value is never a modifier
-        text_buf.append(resolved[upper])
-      elif upper in KEY_MAP:
-        flush_text()
-        press_key(KEY_MAP[upper], shift=shift)
+      if key_count is None:
+        key_count = 1
       else:
-        text_buf.append(m.group(0)) # unknown {TOKEN}, type literally
+        key_count = int(key_count)
+      for _ in range(0, key_count):
+        if upper in resolved:
+          # placeholder → always literal text, + inside value is never a modifier
+          text_buf.append(resolved[upper])
+        elif upper in KEY_MAP:
+          flush_text()
+          press_key(KEY_MAP[upper], shift=shift)
+        else:
+          text_buf.append(m.group(0)) # unknown {TOKEN}, type literally
 
     elif plus_char is not None:
       flush_text()
@@ -309,9 +339,6 @@ def run_autotype(
   flush_text()
 
 
-
-
-
 def matches_entry(entry) -> bool:
   """Return True if this entry should be offered for the active window."""
 
@@ -319,8 +346,7 @@ def matches_entry(entry) -> bool:
   for a in entry._element.findall("AutoType/Association"):
     pattern = (a.findtext("Window") or "").strip()
     if pattern and (
-      fnmatch.fnmatch(win_title, pattern)
-      or fnmatch.fnmatch(win_class, pattern)
+      fnmatch.fnmatch(win_title, pattern) or fnmatch.fnmatch(win_class, pattern)
     ):
       return True
 
@@ -333,6 +359,7 @@ def matches_entry(entry) -> bool:
       return True
 
   return False
+
 
 def _open_keepass(db_path: str, password: str, ttl: int) -> PyKeePass:
   """Open the database, re-prompting via rofi on wrong password until correct or aborted."""
@@ -354,6 +381,7 @@ def _open_keepass(db_path: str, password: str, ttl: int) -> PyKeePass:
       # Cache the new password so a successful open persists it below
       _write_cache(password, ttl)
 
+
 kp = _open_keepass(args.db, kdbx_password, args.cache_ttl)
 print(f"Active window: class={win_class!r}  title={win_title!r}\n")
 
@@ -367,19 +395,19 @@ if len(matched) == 1:
   entry = matched[0]
 else:
   # Build a label list: "Title (username)" for disambiguation
-  labels = [
-    f"{e.title}  [{e.username or ''}]  {e.url or ''}"
-    for e in matched
-  ]
+  labels = [f"{e.title}  [{e.username or ''}]  {e.url or ''}" for e in matched]
   menu_input = "\n".join(labels)
 
   result = subprocess.run(
     [
-      "rofi", "-dmenu",
-      "-i",                        # case-insensitive filter
-      "-p", "KeePass",
-      "-format", "i",              # return selected index, not text
-      "-no-custom",                # disallow free-form input
+      "rofi",
+      "-dmenu",
+      "-i", # case-insensitive filter
+      "-p",
+      "KeePass",
+      "-format",
+      "i", # return selected index, not text
+      "-no-custom", # disallow free-form input
     ],
     input=menu_input,
     capture_output=True,
@@ -416,7 +444,10 @@ if otp_uri:
       counter = struct.pack(">Q", int(time.time()) // 30)
       mac = hmac.new(key, counter, hashlib.sha1).digest()
       offset = mac[-1] & 0x0F
-      code = str((struct.unpack(">I", mac[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000)
+      code = str(
+        (struct.unpack(">I", mac[offset : offset + 4])[0] & 0x7FFFFFFF)
+        % 1_000_000
+      )
       print(f"  OTP Code: {code:0>6}")
     except Exception as e:
       print(f"  OTP Error: {e}")
@@ -443,7 +474,7 @@ print(f"  AutoType sequence: {entry.autotype_sequence}")
 
 associations = [
   {
-    "window":   a.findtext("Window"),
+    "window": a.findtext("Window"),
     "sequence": a.findtext("KeystrokeSequence") or None,
   }
   for a in entry._element.findall("AutoType/Association")
