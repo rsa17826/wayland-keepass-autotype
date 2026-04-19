@@ -207,7 +207,7 @@ KEY_MAP: dict[str, str] = {
 _TOKEN_RE = re.compile(
   r"\{DELAY=(\d+)\}" # group 1: {DELAY=N}  global delay
   + r"|\{DELAY\s+(\d+)\}" # group 2: {DELAY N}  one-shot sleep
-  + r"|(\+?)\{([^}]+)(?: (\d))?\}" # group 3,4: [+]{TOKEN}
+  + r"|(\+?)\{([^ }]+)(?: (\d))?\}" # group 3,4: [+]{TOKEN}
   + r"|(\+)([\s\S])" # group 5,6: +<char>   shift+literal char
   + r"|([^{+]+)" # group 7: plain text chunk
   + r"|([\s\S])", # group 8: fallback single char
@@ -383,8 +383,8 @@ def _open_keepass(db_path: str, password: str, ttl: int) -> PyKeePass:
 
 
 kp = _open_keepass(args.db, kdbx_password, args.cache_ttl)
+win_title='Filen'
 print(f"Active window: class={win_class!r}  title={win_title!r}\n")
-
 matched = [e for e in kp.entries if matches_entry(e)]
 
 if not matched:
