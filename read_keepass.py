@@ -383,7 +383,7 @@ def _open_keepass(db_path: str, password: str, ttl: int) -> PyKeePass:
 
 
 kp = _open_keepass(args.db, kdbx_password, args.cache_ttl)
-win_title='Filen'
+
 print(f"Active window: class={win_class!r}  title={win_title!r}\n")
 matched = [e for e in kp.entries if matches_entry(e)]
 
