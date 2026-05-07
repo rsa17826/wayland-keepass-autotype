@@ -337,6 +337,7 @@ def run_autotype(
       elif plain:
         for c in plain:
           type_char(c)
+    # exiting the with too early seems to cause the typing to abort sometimes
     time.sleep(0.5)
 
 
@@ -439,17 +440,34 @@ if otp_uri:
   params = parse_qs(parsed.query)
   secret_b32 = params.get("secret", [None])[0]
 
+  # Check for Steam encoder/issuer
+  encoder = params.get('encoder', [''])[0].lower()
+  issuer = params.get('issuer', [''])[0].lower()
+  is_steam = "steam" in encoder or "steam" in issuer or "steam" in parsed.path.lower()
+
   if secret_b32:
     try:
+      # 1. Standard HMAC-SHA1 Setup (shared between TOTP and Steam)
       key = base64.b32decode(secret_b32.upper() + ("=" * (-len(secret_b32) % 8)))
       counter = struct.pack(">Q", int(time.time()) // 30)
       mac = hmac.new(key, counter, hashlib.sha1).digest()
       offset = mac[-1] & 0x0F
-      code = str(
-        (struct.unpack(">I", mac[offset : offset + 4])[0] & 0x7FFFFFFF)
-        % 1_000_000
-      )
-      print(f"  OTP Code: {code:0>6}")
+      # Extract the 31-bit integer
+      header = struct.unpack(">I", mac[offset : offset + 4])[0] & 0x7FFFFFFF
+
+      if is_steam:
+        # 2. Steam Specific Encoding
+        steam_chars = "23456789BCDFGHJKMNPQRTVWXY"
+        steam_code = []
+        for _ in range(5):
+          steam_code.append(steam_chars[header % len(steam_chars)])
+          header //= len(steam_chars)
+        code = "".join(steam_code)
+      else:
+        # 3. Standard 6-digit TOTP
+        code = f"{(header % 1_000_000):06d}"
+
+      print(f"  OTP Code: {code} {'(Steam)' if is_steam else ''}")
     except Exception as e:
       print(f"  OTP Error: {e}")
 
