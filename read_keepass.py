@@ -10,6 +10,8 @@ import signal
 import struct
 import subprocess
 import time
+import evdev
+from evdev import InputDevice, ecodes, UInput
 from urllib.parse import parse_qs, urlparse
 
 import evdev
@@ -256,8 +258,6 @@ _CHAR_MAP: dict[str, tuple[int, bool]] = {
   "/": (e.KEY_SLASH, False),
   "?": (e.KEY_SLASH, True),
   " ": (e.KEY_SPACE, False),
-  "\t": (e.KEY_TAB, False),
-  "\n": (e.KEY_ENTER, False),
 }
 
 _ALL_KEYS: list[int] = sorted(
@@ -291,90 +291,53 @@ def run_autotype(
     "KPOTP": otp or "",
     "OTP": otp or "",
   }
-
   delay_ms = 0
-  text_buf: list[str] = []
 
-  with UInput({e.EV_KEY: _ALL_KEYS}, name="keepass-autotype") as ui:
+  with UInput({e.EV_KEY: _ALL_KEYS}, name="KeePass-Virtual-Output") as ui:
+    time.sleep(0.5) # Small buffer for rofi to close and focus to return
 
-    def _tap(keycode: int, shift: bool = False) -> None:
-      if shift:
-        ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
-      ui.write(e.EV_KEY, keycode, 1)
-      ui.write(e.EV_KEY, keycode, 0)
-      if shift:
-        ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 0)
-      ui.syn()
-      if delay_ms > 0:
-        time.sleep(delay_ms / 1000)
-
-    def flush_text() -> None:
-      if not text_buf:
-        return
-      chunk = "".join(text_buf)
-      text_buf.clear()
-      for ch in chunk:
-        if ch in _CHAR_MAP:
-          keycode, shift = _CHAR_MAP[ch]
-          _tap(keycode, shift)
-        else:
-          print(f"  [warn] unmapped character {ch!r}, skipping")
-
-    def press_key(keycode: int, shift: bool = False) -> None:
-      flush_text()
-      _tap(keycode, shift)
+    def type_char(char):
+      print(char, char in _CHAR_MAP)
+      # Same logic as autocorrect.py: Map char to keycode and shift state
+      if char in _CHAR_MAP:
+        keycode, needs_shift = _CHAR_MAP[char]
+        if needs_shift:
+          ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
+        ui.write(e.EV_KEY, keycode, 1)
+        ui.write(e.EV_KEY, keycode, 0)
+        if needs_shift:
+          ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 0)
+        ui.syn()
+        if delay_ms > 0:
+          time.sleep(delay_ms / 1000)
+      else:
+        print(char, "error")
 
     for m in _TOKEN_RE.finditer(sequence):
-      (
-        global_delay,
-        once_delay,
-        modifier,
-        key_name,
-        key_count,
-        _plus,
-        plus_char,
-        plain,
-        fallback,
-      ) = m.groups()
-
-      if global_delay is not None:
-        flush_text()
-        delay_ms = int(global_delay)
-
-      elif once_delay is not None:
-        flush_text()
-        time.sleep(int(once_delay) / 1000)
-
-      elif key_name is not None:
+      g_delay, o_delay, mod, key_name, count, plus, p_char, plain, fall = (
+        m.groups()
+      )
+      print(g_delay, o_delay, mod, key_name, count, plus, p_char, plain, fall)
+      if o_delay:
+        time.sleep(int(o_delay) / 1000)
+      elif key_name:
         upper = key_name.upper()
-        shift = modifier == "+"
-        key_count = 1 if key_count is None else int(key_count)
-        for _ in range(key_count):
-          if upper in resolved:
-            text_buf.append(resolved[upper])
-          elif upper in KEY_MAP:
-            press_key(KEY_MAP[upper], shift=shift)
-          else:
-            text_buf.append(m.group(0))
-
-      elif plus_char is not None:
-        if plus_char in _CHAR_MAP:
-          keycode, _ = (
-            _CHAR_MAP[plus_char.upper()]
-            if plus_char.isalpha()
-            else _CHAR_MAP[plus_char]
-          )
-          press_key(keycode, shift=True)
-        else:
-          print(f"  [warn] unmapped +char {plus_char!r}, skipping")
-
-      elif plain is not None:
-        text_buf.append(plain)
-
-      elif fallback is not None:
-        text_buf.append(fallback)
-
-    flush_text()
+        if upper in resolved:
+          for c in resolved[upper]:
+            type_char(c)
+        elif upper in KEY_MAP:
+          print(count, upper, KEY_MAP[upper], "KEY_MAP[upper]")
+          for _ in range(int(count or 1)):
+            ui.write(e.EV_KEY, KEY_MAP[upper], 1)
+            time.sleep(.01)
+            ui.write(e.EV_KEY, KEY_MAP[upper], 0)
+            if delay_ms > 0:
+              time.sleep(delay_ms / 1000)
+            ui.syn()
+      elif plain:
+        for c in plain:
+          type_char(c)
+    time.sleep(0.5)
 
 
 def matches_entry(entry) -> bool:
