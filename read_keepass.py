@@ -245,6 +245,7 @@ def run_autotype(
     "~": "asciitilde",
     "\\": "backslash",
     "|": "bar",
+    "!": "exclam",
   }
 
   def flush_text() -> None:
