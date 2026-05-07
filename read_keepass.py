@@ -12,6 +12,9 @@ import subprocess
 import time
 from urllib.parse import parse_qs, urlparse
 
+import evdev
+from evdev import UInput, ecodes as e
+
 from pykeepass.pykeepass import PyKeePass
 from sopsy import Sops
 
@@ -163,7 +166,7 @@ win_title: str = win.get("title", "")
 
 
 """
-KeePass autotype sequence executor for Wayland/Hyprland via wtype.
+KeePass autotype sequence executor for Wayland/Hyprland via evdev/uinput.
 
   {DELAY=N}   set inter-keypress delay to N ms (persists)
   {DELAY N}   one-shot sleep of N ms
@@ -179,30 +182,88 @@ KeePass autotype sequence executor for Wayland/Hyprland via wtype.
 
 import re
 
-KEY_MAP: dict[str, str] = {
-  "TAB": "tab",
-  "RETURN": "Return",
-  "BACKSPACE": "BackSpace",
-  "BS": "BackSpace",
-  "DELETE": "Delete",
-  "DEL": "Delete",
-  "INSERT": "Insert",
-  "INS": "Insert",
-  "SPACE": "space",
-  "ESC": "Escape",
-  "UP": "Up",
-  "DOWN": "Down",
-  "LEFT": "Left",
-  "RIGHT": "Right",
-  "HOME": "Home",
-  "END": "End",
-  "PGUP": "Prior",
-  "ENTER": "Return",
-  "PGDN": "Next",
-  "CAPSLOCK": "Caps_Lock",
-  "WIN": "super",
-  **{f"F{i}": f"F{i}" for i in range(1, 17)},
+KEY_MAP: dict[str, int] = {
+  "TAB": e.KEY_TAB,
+  "RETURN": e.KEY_ENTER,
+  "ENTER": e.KEY_ENTER,
+  "BACKSPACE": e.KEY_BACKSPACE,
+  "BS": e.KEY_BACKSPACE,
+  "DELETE": e.KEY_DELETE,
+  "DEL": e.KEY_DELETE,
+  "INSERT": e.KEY_INSERT,
+  "INS": e.KEY_INSERT,
+  "SPACE": e.KEY_SPACE,
+  "ESC": e.KEY_ESC,
+  "UP": e.KEY_UP,
+  "DOWN": e.KEY_DOWN,
+  "LEFT": e.KEY_LEFT,
+  "RIGHT": e.KEY_RIGHT,
+  "HOME": e.KEY_HOME,
+  "END": e.KEY_END,
+  "PGUP": e.KEY_PAGEUP,
+  "PGDN": e.KEY_PAGEDOWN,
+  "CAPSLOCK": e.KEY_CAPSLOCK,
+  "WIN": e.KEY_LEFTMETA,
+  **{f"F{i}": getattr(e, f"KEY_F{i}") for i in range(1, 17)},
 }
+
+# US QWERTY: character → (keycode, needs_shift)
+_CHAR_MAP: dict[str, tuple[int, bool]] = {
+  **{
+    c: (getattr(e, f"KEY_{c.upper()}"), False) for c in "abcdefghijklmnopqrstuvwxyz"
+  },
+  **{c: (getattr(e, f"KEY_{c}"), True) for c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
+  "1": (e.KEY_1, False),
+  "2": (e.KEY_2, False),
+  "3": (e.KEY_3, False),
+  "4": (e.KEY_4, False),
+  "5": (e.KEY_5, False),
+  "6": (e.KEY_6, False),
+  "7": (e.KEY_7, False),
+  "8": (e.KEY_8, False),
+  "9": (e.KEY_9, False),
+  "0": (e.KEY_0, False),
+  "!": (e.KEY_1, True),
+  "@": (e.KEY_2, True),
+  "#": (e.KEY_3, True),
+  "$": (e.KEY_4, True),
+  "%": (e.KEY_5, True),
+  "^": (e.KEY_6, True),
+  "&": (e.KEY_7, True),
+  "*": (e.KEY_8, True),
+  "(": (e.KEY_9, True),
+  ")": (e.KEY_0, True),
+  "-": (e.KEY_MINUS, False),
+  "_": (e.KEY_MINUS, True),
+  "=": (e.KEY_EQUAL, False),
+  "+": (e.KEY_EQUAL, True),
+  "[": (e.KEY_LEFTBRACE, False),
+  "{": (e.KEY_LEFTBRACE, True),
+  "]": (e.KEY_RIGHTBRACE, False),
+  "}": (e.KEY_RIGHTBRACE, True),
+  "\\": (e.KEY_BACKSLASH, False),
+  "|": (e.KEY_BACKSLASH, True),
+  ";": (e.KEY_SEMICOLON, False),
+  ":": (e.KEY_SEMICOLON, True),
+  "'": (e.KEY_APOSTROPHE, False),
+  '"': (e.KEY_APOSTROPHE, True),
+  "`": (e.KEY_GRAVE, False),
+  "~": (e.KEY_GRAVE, True),
+  ",": (e.KEY_COMMA, False),
+  "<": (e.KEY_COMMA, True),
+  ".": (e.KEY_DOT, False),
+  ">": (e.KEY_DOT, True),
+  "/": (e.KEY_SLASH, False),
+  "?": (e.KEY_SLASH, True),
+  " ": (e.KEY_SPACE, False),
+  "\t": (e.KEY_TAB, False),
+  "\n": (e.KEY_ENTER, False),
+}
+
+_ALL_KEYS: list[int] = sorted(
+  {kc for kc, _ in _CHAR_MAP.values()} | set(KEY_MAP.values()) | {e.KEY_LEFTSHIFT}
+)
+
 
 _TOKEN_RE = re.compile(
   r"\{DELAY=(\d+)\}" # group 1: {DELAY=N}  global delay
@@ -213,11 +274,6 @@ _TOKEN_RE = re.compile(
   + r"|([\s\S])", # group 8: fallback single char
   re.IGNORECASE,
 )
-
-
-def _wtype(*args: str) -> None:
-  print(args)
-  _ = subprocess.run(["wtype", *args], check=True)
 
 
 def run_autotype(
@@ -239,105 +295,86 @@ def run_autotype(
   delay_ms = 0
   text_buf: list[str] = []
 
-  # Characters wtype cannot type as literals — map to XKB keysym names.
-  _KEYSYM_CHARS: dict[str, str] = {
-    "`": "grave",
-    "~": "asciitilde",
-    "\\": "backslash",
-    "|": "bar",
-    "!": "exclam",
-  }
+  with UInput({e.EV_KEY: _ALL_KEYS}, name="keepass-autotype") as ui:
 
-  def flush_text() -> None:
-    if not text_buf:
-      return
-    chunk = "".join(text_buf)
-    text_buf.clear()
-    if not chunk: # skip empty — e.g. {kpotp} when otp=""
-      return
-
-    # Split into runs of normal chars and individual keysym chars.
-    run: list[str] = []
-
-    def _flush_run() -> None:
-      if not run:
-        return
-      normal = "".join(run)
-      run.clear()
-      w_args: list[str] = []
+    def _tap(keycode: int, shift: bool = False) -> None:
+      if shift:
+        ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
+      ui.write(e.EV_KEY, keycode, 1)
+      ui.write(e.EV_KEY, keycode, 0)
+      if shift:
+        ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 0)
+      ui.syn()
       if delay_ms > 0:
-        w_args += ["-d", str(delay_ms)]
-      w_args += ["--", normal]
-      _wtype(*w_args)
+        time.sleep(delay_ms / 1000)
 
-    for ch in chunk:
-      if ch in _KEYSYM_CHARS:
-        _flush_run()
-        press_key(_KEYSYM_CHARS[ch])
-      else:
-        run.append(ch)
-    _flush_run()
-
-  def press_key(xkb_key: str, shift: bool = False) -> None:
-    args: list[str] = []
-    if delay_ms > 0:
-      args += ["-s", str(delay_ms)]
-    if shift:
-      args += ["-M", "shift"]
-    args += ["-k", xkb_key]
-    if shift:
-      args += ["-m", "shift"]
-    _wtype(*args)
-
-  for m in _TOKEN_RE.finditer(sequence):
-    (
-      global_delay,
-      once_delay,
-      modifier,
-      key_name,
-      key_count,
-      _plus,
-      plus_char,
-      plain,
-      fallback,
-    ) = m.groups()
-
-    if global_delay is not None:
-      flush_text()
-      delay_ms = int(global_delay)
-
-    elif once_delay is not None:
-      flush_text()
-      time.sleep(int(once_delay) / 1000)
-
-    elif key_name is not None:
-      upper = key_name.upper()
-      shift = modifier == "+"
-      if key_count is None:
-        key_count = 1
-      else:
-        key_count = int(key_count)
-      for _ in range(0, key_count):
-        if upper in resolved:
-          # placeholder → always literal text, + inside value is never a modifier
-          text_buf.append(resolved[upper])
-        elif upper in KEY_MAP:
-          flush_text()
-          press_key(KEY_MAP[upper], shift=shift)
+    def flush_text() -> None:
+      if not text_buf:
+        return
+      chunk = "".join(text_buf)
+      text_buf.clear()
+      for ch in chunk:
+        if ch in _CHAR_MAP:
+          keycode, shift = _CHAR_MAP[ch]
+          _tap(keycode, shift)
         else:
-          text_buf.append(m.group(0)) # unknown {TOKEN}, type literally
+          print(f"  [warn] unmapped character {ch!r}, skipping")
 
-    elif plus_char is not None:
+    def press_key(keycode: int, shift: bool = False) -> None:
       flush_text()
-      press_key(plus_char, shift=True)
+      _tap(keycode, shift)
 
-    elif plain is not None:
-      text_buf.append(plain)
+    for m in _TOKEN_RE.finditer(sequence):
+      (
+        global_delay,
+        once_delay,
+        modifier,
+        key_name,
+        key_count,
+        _plus,
+        plus_char,
+        plain,
+        fallback,
+      ) = m.groups()
 
-    elif fallback is not None:
-      text_buf.append(fallback)
+      if global_delay is not None:
+        flush_text()
+        delay_ms = int(global_delay)
 
-  flush_text()
+      elif once_delay is not None:
+        flush_text()
+        time.sleep(int(once_delay) / 1000)
+
+      elif key_name is not None:
+        upper = key_name.upper()
+        shift = modifier == "+"
+        key_count = 1 if key_count is None else int(key_count)
+        for _ in range(key_count):
+          if upper in resolved:
+            text_buf.append(resolved[upper])
+          elif upper in KEY_MAP:
+            press_key(KEY_MAP[upper], shift=shift)
+          else:
+            text_buf.append(m.group(0))
+
+      elif plus_char is not None:
+        if plus_char in _CHAR_MAP:
+          keycode, _ = (
+            _CHAR_MAP[plus_char.upper()]
+            if plus_char.isalpha()
+            else _CHAR_MAP[plus_char]
+          )
+          press_key(keycode, shift=True)
+        else:
+          print(f"  [warn] unmapped +char {plus_char!r}, skipping")
+
+      elif plain is not None:
+        text_buf.append(plain)
+
+      elif fallback is not None:
+        text_buf.append(fallback)
+
+    flush_text()
 
 
 def matches_entry(entry) -> bool:

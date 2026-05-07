@@ -34,13 +34,13 @@
           ps: with ps; [
             pykeepass
             sopsy
+            evdev
           ]
         );
 
         app = pkgs.writeShellApplication {
           name = "wayland-keepass-autotype";
           runtimeInputs = with pkgs; [
-            wtype
             rofi
             sops
             pythonEnv

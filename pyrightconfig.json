@@ -1,6 +1,6 @@
 {
   "extraPaths": [
     "./base",
-    "/nix/store/rx32qvwdccz6ydc5kaxzmzv79fhix3if-python3-3.13.12-env/lib/python3.13/site-packages"
+    "/nix/store/6qbk2zlpgmk9wpcgihbn9n0vz8m8mq91-python3-3.13.12-env/lib/python3.13/site-packages"
   ]
 }
