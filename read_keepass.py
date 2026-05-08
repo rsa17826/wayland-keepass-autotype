@@ -297,7 +297,6 @@ def run_autotype(
     time.sleep(0.5) # Small buffer for rofi to close and focus to return
 
     def type_char(char):
-      print(char, char in _CHAR_MAP)
       # Same logic as autocorrect.py: Map char to keycode and shift state
       if char in _CHAR_MAP:
         keycode, needs_shift = _CHAR_MAP[char]
@@ -317,7 +316,6 @@ def run_autotype(
       g_delay, o_delay, mod, key_name, count, plus, p_char, plain, fall = (
         m.groups()
       )
-      print(g_delay, o_delay, mod, key_name, count, plus, p_char, plain, fall)
       if o_delay:
         time.sleep(int(o_delay) / 1000)
       elif key_name:
@@ -326,7 +324,6 @@ def run_autotype(
           for c in resolved[upper]:
             type_char(c)
         elif upper in KEY_MAP:
-          print(count, upper, KEY_MAP[upper], "KEY_MAP[upper]")
           for _ in range(int(count or 1)):
             ui.write(e.EV_KEY, KEY_MAP[upper], 1)
             time.sleep(.01)
