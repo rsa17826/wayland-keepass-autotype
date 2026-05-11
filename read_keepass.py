@@ -324,18 +324,20 @@ def run_autotype(
           for c in resolved[upper]:
             type_char(c)
         elif upper in KEY_MAP:
+          # appears to need extra delay with tabs to work well
           for _ in range(int(count or 1)):
             ui.write(e.EV_KEY, KEY_MAP[upper], 1)
             time.sleep(.01)
             ui.write(e.EV_KEY, KEY_MAP[upper], 0)
+            ui.syn()
             if delay_ms > 0:
               time.sleep(delay_ms / 1000)
-            ui.syn()
+            time.sleep(.01)
       elif plain:
         for c in plain:
           type_char(c)
     # exiting the with too early seems to cause the typing to abort sometimes
-    time.sleep(0.5)
+    time.sleep(1)
 
 
 def matches_entry(entry) -> bool:
