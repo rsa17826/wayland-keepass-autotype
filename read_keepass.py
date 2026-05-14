@@ -316,8 +316,18 @@ def run_autotype(
       g_delay, o_delay, mod, key_name, count, plus, p_char, plain, fall = (
         m.groups()
       )
+      print('['+repr(g_delay)+']'+'['+repr( o_delay)+']'+'['+repr( mod)+']'+'['+repr( key_name)+']'+'['+repr( count)+']'+'['+repr( plus)+']'+'['+repr( p_char)+']'+'['+repr( plain)+']'+'['+repr( fall)+']')
+      # continue
+      if g_delay!=None:
+        delay_ms=int(g_delay)
+        continue
       if o_delay:
         time.sleep(int(o_delay) / 1000)
+        continue
+      if mod=="+":
+        ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
+        if delay_ms > 0:
+          time.sleep(delay_ms / 1000)
       elif key_name:
         upper = key_name.upper()
         if upper in resolved:
@@ -336,6 +346,10 @@ def run_autotype(
       elif plain:
         for c in plain:
           type_char(c)
+      if mod=="+":
+        ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 0)
+        if delay_ms > 0:
+          time.sleep(delay_ms / 1000)
     # exiting the with too early seems to cause the typing to abort sometimes
     time.sleep(1)
 
