@@ -1,7 +1,11 @@
 {
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    nixpkgs = {
+      url = "github:nixos/nixpkgs/nixos-unstable";
+    };
+    flake-utils = {
+      url = "github:numtide/flake-utils";
+    };
   };
 
   outputs =
@@ -52,15 +56,19 @@
 
       in
       {
-        packages.default = app;
-
-        apps.default = {
-          type = "app";
-          program = "${app}/bin/wayland-keepass-autotype";
+        packages = {
+          default = app;
         };
-
-        devShells.default = pkgs.mkShell {
-          buildInputs = [ pythonEnv ];
+        apps = {
+          default = {
+            type = "app";
+            program = "${app}/bin/wayland-keepass-autotype";
+          };
+        };
+        devShells = {
+          default = pkgs.mkShell {
+            buildInputs = [ pythonEnv ];
+          };
         };
       }
     );

@@ -328,7 +328,7 @@ def run_autotype(
         ui.write(e.EV_KEY, e.KEY_LEFTSHIFT, 1)
         if delay_ms > 0:
           time.sleep(delay_ms / 1000)
-      elif key_name:
+      if key_name:
         upper = key_name.upper()
         if upper in resolved:
           for c in resolved[upper]:
